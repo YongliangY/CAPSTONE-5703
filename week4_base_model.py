@@ -112,5 +112,3 @@ submodel4.summary()
 print("\nSubmodel 5 Summary:")
 submodel5.summary()
 
-# Optionally, train each sub-model (example for submodel1):
-# history1 = submodel1.fit(X_train, y_train, epochs=50, batch_size=32, validation_split=0.2)
