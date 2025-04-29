@@ -212,4 +212,4 @@ if __name__ == "__main__":
         torch.save(model.state_dict(), f"models/fine_tuned_model_{i}.pth")
         print(f" Saved fine-tuned model: models/fine_tuned_model_{i}.pth")
 
-        evaluate(model, y_support, y_val_fine)
+        evaluate(model, X_val_fine, y_val_fine)
