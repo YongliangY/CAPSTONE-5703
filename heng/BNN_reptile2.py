@@ -20,13 +20,13 @@ class BayesianLinear(nn.Module):
         self.weight_mu = nn.Parameter(torch.Tensor(out_features, in_features))
         self.weight_rho = nn.Parameter(torch.Tensor(out_features, in_features))
         nn.init.xavier_normal_(self.weight_mu, gain=nn.init.calculate_gain('relu'))
-        nn.init.uniform_(self.weight_rho, -5, -4)  # 调整初始化范围
+        nn.init.uniform_(self.weight_rho, -4, -3)  # 调整初始化范围
 
         # 偏置初始化优化
         self.bias_mu = nn.Parameter(torch.Tensor(out_features))
         self.bias_rho = nn.Parameter(torch.Tensor(out_features))
         nn.init.zeros_(self.bias_mu)
-        nn.init.uniform_(self.bias_rho, -6, -5)  # 更保守的初始化
+        nn.init.uniform_(self.bias_rho, -5, -4)  # 更保守的初始化
 
     def forward(self, x, sample=True):
         if sample:
@@ -54,7 +54,7 @@ class BNN(nn.Module):
         self.device = torch.device('cpu')
         prev_dim = input_dim
 
-        # 改进残差连接结构
+        # Improve the residual connection structure
         for h_dim in hidden_dims:
             main_path = nn.ModuleList([
                 BayesianLinear(prev_dim, h_dim),
@@ -66,7 +66,7 @@ class BNN(nn.Module):
             ])
             self.blocks.append(main_path)
 
-            # 增强跳跃连接结构
+            # Strengthen the jump connection structure
             if prev_dim != h_dim:
                 skip_conn = nn.Sequential(
                     BayesianLinear(prev_dim, h_dim),
@@ -78,14 +78,15 @@ class BNN(nn.Module):
             self.blocks.append(skip_conn)
 
             prev_dim = h_dim
-
-        # 改进注意力机制（使用多头注意力）
+        '''
+        # attention mechanism
         self.attention = nn.Sequential(
             BayesianLinear(prev_dim, prev_dim // 16),
             nn.ReLU(),
             BayesianLinear(prev_dim // 16, prev_dim),
             nn.Sigmoid()
         )
+        '''
         self.out_layer = BayesianLinear(prev_dim, output_dim)
 
 
@@ -103,12 +104,13 @@ class BNN(nn.Module):
             x = main_path[4](x, sample)
             x = main_path[5](x)
 
-            assert x.shape == residual.shape, f"维度不匹配: {x.shape} vs {residual.shape}"
+            assert x.shape == residual.shape, f"Dimension mismatch: {x.shape} vs {residual.shape}"
             x = x + residual
-
-        # 多头注意力处理
+        '''
+        # Multi-head attention processing
         attn_weights = self.attention(x)
         x = x * attn_weights
+        '''
         return self.out_layer(x, sample)
 
     def kl_loss(self):
@@ -176,9 +178,13 @@ def train_reptile(model, train_loader, params, X_test, y_test):
         # ==================== 改进任务划分逻辑 ====================
         all_indices = np.arange(len(train_loader.dataset))
         np.random.shuffle(all_indices)
-        task_size = len(train_loader.dataset) // 5  # 随机划分5个任务
+        '''
+        task_size = len(train_loader.dataset) // 5  # Randomly divide into five tasks
         task_indices = [all_indices[i * task_size:(i + 1) * task_size] for i in range(5)]
-
+        '''
+        task_size = 64  # Each task has a fixed 64 samples
+        task_indices = [np.random.choice(len(train_loader.dataset), task_size)
+                        for _ in range(5)]
         task_loaders = [
             DataLoader(
                 Subset(train_loader.dataset, indices),
@@ -254,15 +260,15 @@ def train_reptile(model, train_loader, params, X_test, y_test):
         if (epoch + 1) % 5 == 0:
             metrics = evaluate(model, X_test.to(model.device), y_test.to(model.device))
 
-            # 早停逻辑
+            # Early stop logic
             if metrics['f1'] > best_f1:
                 best_f1 = metrics['f1']
                 torch.save(model.state_dict(), f'best_model_epoch{epoch + 1}.pth')
                 patience = 0
             else:
                 patience += 1
-                if patience >= 5:
-                    print(f"! 早停触发于 epoch {epoch + 1}，最佳F1: {best_f1:.4f}")
+                if patience >= 10: #Originally it was 5
+                    print(f"! Early stop is triggered at epoch {epoch + 1}，Best F1: {best_f1:.4f}")
                     return model
 
             print(
@@ -312,7 +318,7 @@ def parameter_search(train_loader, X_test, y_test, num_trials=30):
         'meta_lr': [3e-4, 5e-4, 1e-3],
         'inner_lr': [0.05, 0.1, 0.15],
         'num_inner_steps': [7, 10, 15],  # 扩展步数
-        'kl_weight': [0.01, 0.03, 0.05, 0.07],  # 扩展范围
+        'kl_weight': [0.001, 0.003, 0.005],  # 扩展范围
         'hidden_dims': [
             [512, 256, 128],
             [256, 128, 64, 32],
@@ -320,7 +326,7 @@ def parameter_search(train_loader, X_test, y_test, num_trials=30):
             [1024, 512]
         ],
         'dropout_rate': [0.2, 0.35, 0.5],
-        'num_epochs': [50],
+        'num_epochs': [100],
         'eval_samples': [60]
     }
 
@@ -332,9 +338,9 @@ def parameter_search(train_loader, X_test, y_test, num_trials=30):
         params = {k: random.choice(v) for k, v in param_space.items()}
         params['hidden_dims'] = random.choice(param_space['hidden_dims'])
 
-        print(f"\n试验 {trial + 1}/{num_trials}")
-        print(f"参数组合: { {k: v for k, v in params.items() if k != 'hidden_dims'} }")
-        print(f"网络结构: {params['hidden_dims']}")
+        print(f"\ntrial {trial + 1}/{num_trials}")
+        print(f"Parameter Combination: { {k: v for k, v in params.items() if k != 'hidden_dims'} }")
+        print(f"Network structure: {params['hidden_dims']}")
 
         model = BNN(21, 4, params['hidden_dims'], params['dropout_rate'])
         train_reptile(model, train_loader, params, X_test, y_test)
@@ -347,7 +353,7 @@ def parameter_search(train_loader, X_test, y_test, num_trials=30):
             best_params = params
             torch.save(model.state_dict(), 'best_model.pth')
 
-        print(f"当前F1: {metrics['f1']:.4f} | 最佳F1: {best_score:.4f}")
+        print(f"Current F1: {metrics['f1']:.4f} | Best F1: {best_score:.4f}")
 
     pd.DataFrame([{**p, **m} for p, m in results]).to_csv('search_results.csv', index=False)
     return best_params
@@ -355,15 +361,14 @@ def parameter_search(train_loader, X_test, y_test, num_trials=30):
 
 # ==================== 主流程 ====================
 def main():
-    # 数据加载
     train_loader, X_test, y_test = load_data('train_smote_pca.csv', 'test_smote_pca.csv')
 
     # 参数搜索
-    print("\n开始参数搜索...")
+    print("\nStart parameter search...")
     best_params = parameter_search(train_loader, X_test, y_test)
 
     # 最终训练
-    print("\n使用最佳参数进行最终训练...")
+    print("\nConduct the final training using the best parameters...")
     final_model = BNN(
         input_dim=21,
         output_dim=4,
@@ -377,14 +382,13 @@ def main():
     }
     train_reptile(final_model, train_loader, final_params, X_test, y_test)
 
-    # 最终评估
     final_metrics = evaluate(final_model, X_test, y_test, num_samples=300)
     print("\nFinal Performance:")
     print(f"Accuracy: {final_metrics['accuracy']:.4f}")
     print(f"F1: {final_metrics['f1']:.4f}")
     print("confusion_matrix:\n", final_metrics['confusion_matrix'])
 
-    # 保存模型
+
     torch.save(final_model.state_dict(), 'final_model.pth')
 
 
