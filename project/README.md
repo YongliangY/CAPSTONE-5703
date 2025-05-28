@@ -1,1 +1,1 @@
-This is the coding part of the project
+This is the part of some EDA and data processing. 
